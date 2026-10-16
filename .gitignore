@@ -1,7 +1,8 @@
-   venv/
-   __pycache__/
-   .env
-   *.pyc
-   .DS_Store
-   node_modules/
+venv/
+__pycache__/
+.env
+*.pyc
+.DS_Store
+node_modules/
 ml/data/
+ml/models/random_forest.joblib
