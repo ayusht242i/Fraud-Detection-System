@@ -3,5 +3,7 @@
   "w_rf": 1.0,
   "if_min": 0.3232968608402609,
   "if_max": 0.8149279849841214,
-  "threshold": 0.44666666666666666
+  "threshold": 0.44666666666666666,
+  "union_if_rate": 0,
+  "union_if_cut": null
 }
