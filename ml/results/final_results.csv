@@ -1,0 +1,5 @@
+model,cutoff,pr_auc,roc_auc,precision,recall,f1,TP,FP,FN,TN
+Logistic Regression (plain),0.5,0.6889,0.9599,0.8507,0.6,0.7037,57,10,38,56641
+Logistic Regression (balanced),0.5,0.6715,0.9655,0.0552,0.8737,0.1039,83,1420,12,55231
+Isolation Forest (unsupervised),0.6386,0.1997,0.9283,0.2474,0.2526,0.25,24,73,71,56578
+Random Forest (final model),0.4467,0.797,0.9731,0.9595,0.7474,0.8402,71,3,24,56648
