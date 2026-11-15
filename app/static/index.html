@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fraud Watch</title>
+<style>
+  body { font-family: "Segoe UI", Arial, sans-serif; margin: 0; background: #f1f5f9; color: #1e293b; }
+  header { background: #0f172a; color: #fff; padding: 28px 24px; }
+  header h1 { margin: 0 0 6px; }
+  header p { margin: 0; color: #cbd5e1; max-width: 640px; }
+  main { max-width: 900px; margin: 0 auto; padding: 20px; }
+  section { background: #fff; border-radius: 14px; padding: 20px; margin-bottom: 18px; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+  h2 { margin: 0 0 4px; font-size: 20px; }
+  .muted { color: #64748b; font-size: 14px; }
+  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 18px; }
+  .steps div { background: #fff; border-radius: 14px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.1); font-size: 14px; }
+  button, select { font-size: 15px; padding: 8px 14px; border-radius: 8px; border: 1px solid #cbd5e1; }
+  button.primary { background: #0f172a; color: #fff; border: none; cursor: pointer; }
+  .result { margin-top: 14px; padding: 14px; border-radius: 10px; }
+  .red { background: #fef2f2; border: 1px solid #fecaca; }
+  .green { background: #ecfdf5; border: 1px solid #a7f3d0; }
+  .bar { position: relative; height: 12px; background: #e2e8f0; border-radius: 6px; margin: 10px 0 4px; }
+  .fill { height: 12px; border-radius: 6px; }
+  .mark { position: absolute; top: -4px; width: 2px; height: 20px; background: #0f172a; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-top: 14px; }
+  .card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px; }
+  .card b { display: block; font-size: 26px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 12px; }
+  th { text-align: left; color: #64748b; padding: 6px 8px 6px 0; }
+  td { border-top: 1px solid #f1f5f9; padding: 6px 8px 6px 0; }
+  .tag { font-size: 12px; padding: 1px 6px; border-radius: 4px; margin-right: 6px; }
+  .ai { background: #e0e7ff; color: #3730a3; }
+  .rule { background: #fef3c7; color: #92400e; }
+  input[type=range] { width: 100%; margin-top: 14px; }
+  #error { color: #b91c1c; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Fraud Watch</h1>
+  <p>An AI assistant that scores every card payment and sends the suspicious ones to a person for review. It never blocks a payment on its own.</p>
+</header>
+<main>
+  <p id="error"></p>
+  <div class="steps">
+    <div><b>1. Score</b><br>Every payment gets a risk score from 0 to 100, based on patterns learned from past fraud.</div>
+    <div><b>2. Flag</b><br>Payments at or above the alert line are sent to a person. Nothing is blocked automatically.</div>
+    <div><b>3. Review</b><br>A person checks each flagged payment. Every flag is also recorded for an audit trail.</div>
+  </div>
+
+  <section>
+    <h2>Try a payment</h2>
+    <div class="muted">Pick a real payment from the held-back test data and let the system score it.</div>
+    <p><select id="pick"></select> <button class="primary" onclick="check()">Check this payment</button></p>
+    <div id="amount" class="muted"></div>
+    <div id="out"></div>
+    <p class="muted">The payment details are anonymised numbers, so the system cannot explain its score in words.</p>
+  </section>
+
+  <section>
+    <h2>Where do we draw the alert line?</h2>
+    <div class="muted">Payments at or above the line are sent for review. Move it and watch the trade-off.</div>
+    <input type="range" id="cut" min="0.05" max="0.95" step="0.01" value="0.45" oninput="update()">
+    <div class="muted">Left: catch more fraud, more false alarms. Right: fewer false alarms, miss more fraud.</div>
+    <p>Alert line: <b id="cutlabel"></b> out of 100 <button onclick="resetCut()">Reset to the system setting</button></p>
+    <div class="cards" id="cards"></div>
+    <p id="sentence"></p>
+    <p class="muted">This demo set is about 10% fraud, while real life is nearer 0.2%, so the same false-alarm rate would feel far heavier in practice. A real bank would only learn which payments were fraud later.</p>
+  </section>
+
+  <section>
+    <h2>Payments sent for review</h2>
+    <div class="muted">Flagged at the system's own setting. A person would look at each one.</div>
+    <div id="table"></div>
+  </section>
+  <p class="muted">Built on a public, anonymised card-fraud dataset. Not connected to any bank.</p>
+</main>
+<script>
+var REASONS = {
+  "High amount deviation": "Much larger than this account's usual payments",
+  "Impossible travel pattern": "Two different cities within 2 hours",
+  "ML model flagged": "The AI risk score is above the alert line"
+};
+var LABELS = {
+  fraud_caught_by_model: "A fraud payment the system catches",
+  fraud_missed_by_model: "A fraud payment the system misses",
+  legit_not_flagged: "An ordinary payment"
+};
+var txns = [], systemCut = 0.45, samples = {};
+
+async function api(path, opts) {
+  var r = await fetch(path, opts);
+  if (!r.ok) throw new Error(path + " returned status " + r.status);
+  return r.json();
+}
+function bar(score, cut) {
+  var color = score >= cut ? "#ef4444" : "#10b981";
+  return '<div class="bar"><div class="fill" style="width:' + Math.round(score * 100) + '%;background:' + color + '"></div><div class="mark" style="left:' + Math.round(cut * 100) + '%"></div></div>';
+}
+function card(label, v) {
+  return '<div class="card"><span class="muted">' + label + '</span><b>' + v + '</b></div>';
+}
+function showAmount() {
+  var s = samples[document.getElementById("pick").value];
+  document.getElementById("amount").textContent = "Amount: " + s.payload.Amount.toFixed(2) + ". The other details are anonymised numbers.";
+  document.getElementById("out").innerHTML = "";
+  document.getElementById("out").className = "";
+}
+async function check() {
+  var s = samples[document.getElementById("pick").value];
+  var out = document.getElementById("out");
+  out.className = "";
+  out.textContent = "Checking...";
+  try {
+    var r = await api("/score", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(s.payload)});
+    var flagged = r.is_flagged;
+    var truth = s.true_label === 1
+      ? "It really was fraud. " + (flagged ? "The system got it right." : "The system missed it.")
+      : "It was an ordinary payment. " + (flagged ? "The system raised a false alarm." : "The system got it right.");
+    out.className = "result " + (flagged ? "red" : "green");
+    out.innerHTML = "<b>" + (flagged ? "Sent to a person for review" : "Looks normal - no review needed") + "</b>" +
+      bar(r.fraud_probability, r.threshold) +
+      '<div class="muted">Risk score ' + Math.round(r.fraud_probability * 100) + " out of 100. The dark mark is the alert line (" + Math.round(r.threshold * 100) + ").</div>" +
+      '<p><a href="#" id="reveal">Reveal what this payment really was</a></p>' +
+      '<p id="truth" style="display:none"><b>' + truth + "</b></p>";
+    document.getElementById("reveal").onclick = function (e) {
+      e.preventDefault();
+      this.style.display = "none";
+      document.getElementById("truth").style.display = "block";
+    };
+  } catch (e) {
+    out.className = "result red";
+    out.textContent = "Could not reach the system: " + e.message;
+  }
+}
+function update() {
+  var cut = parseFloat(document.getElementById("cut").value);
+  var tp = 0, fp = 0, fn = 0;
+  for (var i = 0; i < txns.length; i++) {
+    var flag = txns[i].probability >= cut;
+    var fraud = txns[i].true_class === 1;
+    if (flag && fraud) tp++; else if (flag) fp++; else if (fraud) fn++;
+  }
+  document.getElementById("cutlabel").textContent = Math.round(cut * 100);
+  document.getElementById("cards").innerHTML = card("Payments checked", txns.length) + card("Sent for review", tp + fp) +
+    card("Real fraud caught", tp + " of " + (tp + fn)) + card("False alarms", fp);
+  document.getElementById("sentence").textContent = "At this setting the system catches " + tp + " of " + (tp + fn) +
+    " fraud payments and wrongly flags " + fp + " honest ones.";
+}
+function resetCut() {
+  document.getElementById("cut").value = systemCut;
+  update();
+}
+function table(rows) {
+  var h = "<table><tr><th>Payment</th><th>Amount</th><th>Why it was flagged</th><th>Risk</th><th>What it really was</th></tr>";
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    var ai = r.flag_reason === "ML model flagged";
+    h += "<tr><td>#" + r.txn_id + "</td><td>" + r.amount.toFixed(2) + '</td><td><span class="tag ' + (ai ? "ai" : "rule") + '">' +
+      (ai ? "AI" : "Rule") + "</span>" + (REASONS[r.flag_reason] || r.flag_reason) + "</td><td>" +
+      (ai ? Math.round(r.risk_score * 100) + " / 100" : "-") + "</td><td>" +
+      (r.true_class === 1 ? "Real fraud" : r.true_class === 0 ? "False alarm" : "Not known") + "</td></tr>";
+  }
+  return h + "</table>";
+}
+async function init() {
+  try {
+    var data = await Promise.all([api("/transactions?limit=1000"), api("/flagged?limit=100"), api("/samples")]);
+    txns = data[0].transactions;
+    systemCut = data[0].threshold;
+    samples = data[2];
+    var sel = document.getElementById("pick");
+    for (var k in LABELS) {
+      if (samples[k]) sel.innerHTML += '<option value="' + k + '">' + LABELS[k] + "</option>";
+    }
+    sel.onchange = showAmount;
+    showAmount();
+    document.getElementById("cut").value = systemCut;
+    update();
+    document.getElementById("table").innerHTML = table(data[1]);
+  } catch (e) {
+    document.getElementById("error").textContent = "Could not load data: " + e.message + ". Is the API running?";
+  }
+}
+init();
+</script>
+</body>
+</html>

@@ -171,3 +171,34 @@ def metrics():
             "recall": round(tp / (tp + fn), 4) if tp + fn else None,
             "max_abs_diff_vs_offline_probability": round(diff, 4),
             "note": "Demo mix of 30 fraud and 270 legit rows from the test set. Precision here is not comparable to the real 0.17% fraud rate."}
+
+
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(CORSMiddleware,
+                   allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+                   allow_methods=["*"], allow_headers=["*"])
+
+
+@app.get("/transactions")
+def transactions(limit: int = 1000):
+    with session() as cur:
+        cur.execute(
+            "SELECT t.txn_id, t.amount, t.txn_time, m.fraud_probability, m.anomaly_score, f.true_class "
+            "FROM ml_scores m JOIN Transactions t ON t.txn_id = m.txn_id "
+            "LEFT JOIN transaction_features f ON f.txn_id = m.txn_id "
+            "ORDER BY m.fraud_probability DESC, t.txn_id LIMIT %s", (limit,))
+        rows = cur.fetchall()
+    return {"threshold": THRESHOLD,
+            "transactions": [{"txn_id": r[0], "amount": float(r[1]), "txn_time": r[2].isoformat(),
+                              "probability": float(r[3]),
+                              "anomaly": float(r[4]) if r[4] is not None else None,
+                              "true_class": r[5]} for r in rows]}
+
+
+from fastapi.responses import FileResponse
+
+
+@app.get("/demo", include_in_schema=False)
+def demo():
+    return FileResponse(Path(__file__).resolve().parent / "static" / "index.html")
